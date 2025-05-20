@@ -1,28 +1,23 @@
 import Merchant from '../models/Merchant.js';
+import { ApiError } from '../utils/ApiError.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 // Add Merchant
-export const addMerchant = async (req, res) => {
-  try {
-    const { name, contactInfo, storeLocation } = req.body;
-    if (!name || !contactInfo || !contactInfo.email) {
-      return res.status(400).json({ message: 'Name and contact email are required' });
-    }
+export const addMerchant = asyncHandler(async (req, res) => {
+const { name, contactInfo, storeLocation } = req.body;
 
-    const merchant = new Merchant({ name, contactInfo, storeLocation });
-    await merchant.save();
+if (!name || !contactInfo || !contactInfo.email) {
+throw new ApiError(400, 'Name and contact email are required');
+}
 
-    res.status(201).json({ message: 'Merchant added', merchant });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
+const merchant = new Merchant({ name, contactInfo, storeLocation });
+await merchant.save();
+
+res.status(201).json({ message: 'Merchant added', merchant });
+});
 
 // Get All Merchants
-export const getMerchants = async (req, res) => {
-  try {
-    const merchants = await Merchant.find();
-    res.json(merchants);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
+export const getMerchants = asyncHandler(async (req, res) => {
+const merchants = await Merchant.find();
+res.json(merchants);
+});

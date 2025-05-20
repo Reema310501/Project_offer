@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Offer from '../models/Offer.js';
 import MerchantProduct from '../models/MerchantProduct.js';
+import { ApiError } from '../utils/ApiError.js';
 
 const { Types } = mongoose;
 
@@ -62,7 +63,7 @@ const applyDiscount = async (offer) => {
 };
 
 // Create offer
-export const createOffer = async (req, res) => {
+export const createOffer = async (req, res, next) => {
   try {
     let {
       merchant,
@@ -83,10 +84,7 @@ export const createOffer = async (req, res) => {
         specificProducts = JSON.parse(specificProducts);
         specificProducts = specificProducts.map(id => new Types.ObjectId(id));
       } catch (err) {
-        return res.status(400).json({
-          success: false,
-          message: 'specificProducts must be a valid JSON array string.',
-        });
+        return next(new ApiError(400, 'specificProducts must be a valid JSON array string.'));
       }
     } else {
       specificProducts = [];
@@ -98,17 +96,11 @@ export const createOffer = async (req, res) => {
     if (isNaN(discountPercentage)) missingFields.push('discountPercentage');
 
     if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Missing or invalid required fields: ${missingFields.join(', ')}`,
-      });
+      return next(new ApiError(400, `Missing or invalid required fields: ${missingFields.join(', ')}`));
     }
 
     if (!appliesToAllProducts && (!Array.isArray(specificProducts) || specificProducts.length === 0)) {
-      return res.status(400).json({
-        success: false,
-        message: 'specificProducts array is required when appliesToAllProducts is false.',
-      });
+      return next(new ApiError(400, 'specificProducts array is required when appliesToAllProducts is false.'));
     }
 
     const now = new Date();
@@ -138,8 +130,6 @@ export const createOffer = async (req, res) => {
     const offer = new Offer(offerData);
 
     // Apply discounts
-    const affectedProducts = [];
-
     if (appliesToAllProducts) {
       const products = await MerchantProduct.find({ merchant });
 
@@ -151,40 +141,25 @@ export const createOffer = async (req, res) => {
 
         product.merchantPrice = product.merchantPrice * (1 - discountPercentage / 100);
         await product.save();
-
-        affectedProducts.push(product._id);
       }
     } else {
-      console.log(specificProducts, "=========");
-
       for (const id of specificProducts) {
-        console.log('Checking Product ID:', id);
-
-        // Find MerchantProduct where 'product' field equals this id
         const product = await MerchantProduct.findOne({ product: id });
-
-        console.log('Fetched Product:', product);
-
-        if (!product) {
-          console.log('Product not found for product field:', id);
-          continue;
-        }
+        if (!product) continue;
 
         offer.originalPrices.push({
           merchantProduct: product._id,
-          originalPrice: product.merchantPrice * (1 - discountPercentage / 100)
+          originalPrice: product.merchantPrice,
         });
 
+        product.merchantPrice = product.merchantPrice * (1 - discountPercentage / 100);
         await product.save();
-
-        affectedProducts.push(product._id);
       }
     }
 
     await offer.save();
 
-
-    // Set timeout to restore prices after 5 mins
+    // Schedule rollback
     setTimeout(async () => {
       try {
         const currentOffer = await Offer.findById(offer._id);
@@ -207,26 +182,24 @@ export const createOffer = async (req, res) => {
 
     res.status(201).json({ success: true, offer });
   } catch (error) {
-    console.error('Create Offer Error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    next(new ApiError(500, error.message));
   }
 };
 
-
 // Get all offers
-export const getOffers = async (req, res) => {
+export const getOffers = async (req, res, next) => {
   try {
     const offers = await Offer.find()
       .populate('merchant')
       .populate('specificProducts');
     res.json({ success: true, offers });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(new ApiError(500, error.message));
   }
 };
 
 // Get offers applicable on a specific product
-export const getOffersByProduct = async (req, res) => {
+export const getOffersByProduct = async (req, res, next) => {
   try {
     const { productId } = req.params;
 
@@ -244,19 +217,19 @@ export const getOffersByProduct = async (req, res) => {
 
     res.json({ success: true, offers });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(new ApiError(500, error.message));
   }
 };
 
 // Update offer
-export const updateOffer = async (req, res) => {
+export const updateOffer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
 
     const offer = await Offer.findById(id);
     if (!offer) {
-      return res.status(404).json({ success: false, message: 'Offer not found' });
+      return next(new ApiError(404, 'Offer not found'));
     }
 
     Object.assign(offer, updateData);
@@ -264,18 +237,18 @@ export const updateOffer = async (req, res) => {
 
     res.json({ success: true, offer });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(new ApiError(500, error.message));
   }
 };
 
 // Delete offer and rollback prices
-export const deleteOffer = async (req, res) => {
+export const deleteOffer = async (req, res, next) => {
   try {
     const { id } = req.params;
     const offer = await Offer.findById(id);
 
     if (!offer) {
-      return res.status(404).json({ success: false, message: 'Offer not found' });
+      return next(new ApiError(404, 'Offer not found'));
     }
 
     for (const priceInfo of offer.originalPrices) {
@@ -290,6 +263,6 @@ export const deleteOffer = async (req, res) => {
 
     res.json({ success: true, message: 'Offer deleted and prices restored.' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(new ApiError(500, error.message));
   }
 };
